@@ -1,6 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import MetaData
-from sqlalchemy.orm import validates
+from sqlalchemy import MetaData, ForeignKey, CheckConstraint
+from sqlalchemy.orm import relationship, validates
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy_serializer import SerializerMixin
 
@@ -12,36 +12,49 @@ metadata = MetaData(
 
 db = SQLAlchemy(metadata=metadata)
 
-
 class Restaurant(db.Model, SerializerMixin):
     __tablename__ = "restaurants"
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    address = db.Column(db.String)
+    name = db.Column(db.String, nullable=False)
+    address = db.Column(db.String, nullable=False)
 
-    # add relationship
+    restaurant_pizzas = relationship("RestaurantPizza", back_populates="restaurant")
 
-    # add serialization rules
+    serialize_rules = ("-restaurant_pizzas.restaurant",)
 
-    def __repr__(self):
-        return f"<Restaurant {self.name}>"
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "address": self.address,
+        }
 
+    def to_dict_with_pizzas(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "address": self.address,
+            "restaurant_pizzas": [rp.to_dict() for rp in self.restaurant_pizzas]
+        }
 
 class Pizza(db.Model, SerializerMixin):
     __tablename__ = "pizzas"
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    ingredients = db.Column(db.String)
+    name = db.Column(db.String, nullable=False)
+    ingredients = db.Column(db.String, nullable=False)
 
-    # add relationship
+    restaurant_pizzas = relationship("RestaurantPizza", back_populates="pizza")
 
-    # add serialization rules
+    serialize_rules = ("-restaurant_pizzas.pizza",)
 
-    def __repr__(self):
-        return f"<Pizza {self.name}, {self.ingredients}>"
-
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "ingredients": self.ingredients,
+        }
 
 class RestaurantPizza(db.Model, SerializerMixin):
     __tablename__ = "restaurant_pizzas"
@@ -49,11 +62,28 @@ class RestaurantPizza(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     price = db.Column(db.Integer, nullable=False)
 
-    # add relationships
+    restaurant_id = db.Column(db.Integer, ForeignKey("restaurants.id"), nullable=False)
+    pizza_id = db.Column(db.Integer, ForeignKey("pizzas.id"), nullable=False)
 
-    # add serialization rules
+    restaurant = relationship("Restaurant", back_populates="restaurant_pizzas")
+    pizza = relationship("Pizza", back_populates="restaurant_pizzas")
 
-    # add validation
+    serialize_rules = ("-restaurant.restaurant_pizzas", "-pizza.restaurant_pizzas")
 
-    def __repr__(self):
-        return f"<RestaurantPizza ${self.price}>"
+    __table_args__ = (
+        CheckConstraint("price >= 1 AND price <= 30", name="price_between_1_and_30"),
+    )
+
+    @validates("price")
+    def validate_price(self, key, value):
+        if not (1 <= value <= 30):
+            raise ValueError("Price must be between 1 and 30")
+        return value
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "price": self.price,
+            "restaurant_id": self.restaurant_id,
+            "pizza_id": self.pizza_id,
+        }
